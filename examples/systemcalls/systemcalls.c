@@ -1,4 +1,12 @@
 #include "systemcalls.h"
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include <sys/stat.h>
+#include <fcntl.h>
+
 
 /**
  * @param cmd the command to execute with system()
@@ -9,15 +17,14 @@
 */
 bool do_system(const char *cmd)
 {
-
 /*
  * TODO  add your code here
  *  Call the system() function with the command set in the cmd
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-
-    return true;
+    int rc = system(cmd);
+    return rc == 0;
 }
 
 /**
@@ -45,9 +52,6 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
 /*
  * TODO:
@@ -58,6 +62,36 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+
+    if (command[0][0] != '/') {
+        // Not absolute path used!
+        return false;
+    }
+
+    int status;
+    pid_t pid;
+
+    fflush(stdout);
+
+    pid = fork();
+
+    if (pid == -1) {
+        return false;
+    }
+    else if (pid == 0) {
+        execv(command[0], &command[0]);
+        // If execv returns -- something has gone wrong
+        return false;
+    }
+
+    int rc = waitpid(pid, &status, 0);
+
+    if (rc == -1) {
+        return false;
+    }
+    else if (WIFEXITED(status)){
+        return WEXITSTATUS(status) == 0;
+    }
 
     va_end(args);
 
@@ -80,11 +114,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-
 /*
  * TODO
  *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
@@ -92,6 +121,52 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+
+    if (fd < 0){
+        perror("Opening file to redirect to");
+        return false;
+    }
+
+    if (command[0][0] != '/') {
+        // Not absolute path used!
+        close(fd);
+        return false;
+    }
+
+    int status;
+    pid_t pid;
+
+    fflush(stdout);
+
+    pid = fork();
+    if (pid == -1) {
+        close(fd);
+        return false;
+    }
+    else if (pid == 0) {
+        int dup2rc = dup2(fd, 1);
+
+        if (dup2rc < 0) {
+            perror("Redirecting to another file descriptor");
+            exit(1);
+        }
+
+        execv(command[0], &command[0]);
+        // If execv returns -- something has gone wrong
+        exit(1);
+    }
+
+    int rc = waitpid(pid, &status, 0);
+
+    close(fd);
+
+    if (rc == -1) {
+        return false;
+    }
+    else if (WIFEXITED(status)){
+        return WEXITSTATUS(status) == 0;
+    }
 
     va_end(args);
 
