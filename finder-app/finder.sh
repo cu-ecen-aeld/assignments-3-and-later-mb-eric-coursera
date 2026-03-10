@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 exp_num_arg=2
 
 if ! [ $# -eq ${exp_num_arg} ]; then

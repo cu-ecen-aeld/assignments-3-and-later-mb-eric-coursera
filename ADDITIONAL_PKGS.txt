@@ -1,0 +1,4 @@
+flex
+bison
+libssl-dev
+qemu-system-arm
