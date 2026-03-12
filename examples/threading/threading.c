@@ -10,15 +10,31 @@
 
 void* threadfunc(void* thread_param)
 {
-
     // TODO: wait, obtain mutex, wait, release mutex as described by thread_data structure
     // hint: use a cast like the one below to obtain thread arguments from your parameter
     //struct thread_data* thread_func_args = (struct thread_data *) thread_param;
+    thread_data_t* thread_func_args = (thread_data_t *) thread_param;
+    usleep(1000 * thread_func_args->wait_to_obtain_ms);
+    int rc = pthread_mutex_lock(thread_func_args->mutex_ptr);
+    if (rc != 0){
+        thread_func_args->thread_complete_success = false;
+        return thread_param;
+    }
+    usleep(1000 * thread_func_args->wait_to_release_ms);
+    rc = pthread_mutex_unlock(thread_func_args->mutex_ptr);
+    if (rc != 0){
+        thread_func_args->thread_complete_success = false;
+        return thread_param;
+    }
+    thread_func_args->thread_complete_success = true;
     return thread_param;
 }
 
 
-bool start_thread_obtaining_mutex(pthread_t *thread, pthread_mutex_t *mutex,int wait_to_obtain_ms, int wait_to_release_ms)
+bool start_thread_obtaining_mutex(pthread_t *thread,
+                                  pthread_mutex_t *mutex,
+                                  int wait_to_obtain_ms,
+                                  int wait_to_release_ms)
 {
     /**
      * TODO: allocate memory for thread_data, setup mutex and wait arguments, pass thread_data to created thread
@@ -28,6 +44,31 @@ bool start_thread_obtaining_mutex(pthread_t *thread, pthread_mutex_t *mutex,int 
      *
      * See implementation details in threading.h file comment block
      */
-    return false;
+
+    // Allocate
+    thread_data_t *tdata               = calloc(sizeof(thread_data_t), 1);
+
+    if (tdata == NULL){
+        fprintf(stderr, "Could not allocate memory for thread_data.\n");
+        return false;
+    }
+
+    // Setup mutex wait args
+    tdata->mutex_ptr                   = mutex;
+    tdata->wait_to_obtain_ms           = wait_to_obtain_ms;
+    tdata->wait_to_release_ms          = wait_to_release_ms;
+    tdata->thread_complete_success     = false;
+
+    // pass thread_data to created thread
+    int rc = pthread_create(thread, NULL, &threadfunc, tdata);
+    if (rc != 0){
+        ERROR_LOG("Could not create thread, for some reason, rc = %d\n", rc);
+        free(tdata);
+        return false;
+    }
+    else{
+        printf("Created thread successfully\n");
+    }
+    return true;
 }
 
