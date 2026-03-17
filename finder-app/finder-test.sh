@@ -5,10 +5,27 @@
 set -e
 set -u
 
+#
+#        b. Modify your finder-test.sh to run with necessary files found in the PATH.
+#
+#                i. In other words, you should be able to run /path/to/script/finder-test.sh 
+#                   and the script should run successfully, assuming all executables are in 
+#                   the PATH and config files are at /etc/finder-app/conf. This change will 
+#                   be added to your assignment 3 and later source repository.  The point of 
+#                   this step is to ensure you can run the finder-test.sh script using 
+#                   /usr/bin/finder-test.sh and all scripts and executables needed by 
+#                   finder-test.sh will be located on the target qemu rootfs.
+#
+
+
+
 NUMFILES=10
 WRITESTR=AELD_IS_FUN
-WRITEDIR=/tmp/aeld-data
-username=$(cat conf/username.txt)
+WRITEDIR=/tmp/assignment4-result.txt
+CONFDIR_ROOT=/etc/finder-app
+#CONFDIR_ROOT=$(dirname $(realpath $0))
+username=$(cat ${CONFDIR_ROOT}/conf/username.txt)
+
 
 if [ $# -lt 3 ]
 then
@@ -32,7 +49,7 @@ echo "Writing ${NUMFILES} files containing string ${WRITESTR} to ${WRITEDIR}"
 rm -rf "${WRITEDIR}"
 
 # create $WRITEDIR if not assignment1
-assignment=`cat conf/assignment.txt`
+assignment=`cat ${CONFDIR_ROOT}/conf/assignment.txt`
 
 if [ $assignment != 'assignment1' ]
 then
@@ -54,10 +71,10 @@ echo "Removing the old writer utility and compiling as a native application"
 
 for i in $( seq 1 $NUMFILES)
 do
-	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+	writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
 done
 
-OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
+OUTPUTSTRING=$(finder.sh "$WRITEDIR" "$WRITESTR")
 
 # remove temporary directories
 rm -rf /tmp/aeld-data
