@@ -49,7 +49,6 @@ int setup_socket(){
     }
  
     int socket_fd = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-    freeaddrinfo(servinfo);
 
     if (socket_fd < 0) {
         syslog(LOG_ERR, "socket() failed");
@@ -60,6 +59,7 @@ int setup_socket(){
     setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
 
     status = bind(socket_fd, servinfo->ai_addr, sizeof(struct sockaddr));
+    freeaddrinfo(servinfo);
     if (status < 0)
     {
         syslog(LOG_ERR, "bind() failed");
@@ -90,7 +90,6 @@ int send_file_content(int client_fd){
     size_t bytes_read = 0;
     while ( (bytes_read = fread(buf, sizeof(buf[0]), sizeof buf, f)) > 0){
         int bytes_sent = 0;
-        printf("reading file, bytes_read = %lu\n", bytes_read);
         if (bytes_read < sizeof buf && ferror(f)){
             fclose(f);
             return -1;
@@ -122,7 +121,40 @@ int send_file_content(int client_fd){
     }
     return total_bytes_read;
 }
-    
+
+
+void daemonize()
+{
+    pid_t childpid = fork();
+    if (childpid == -1){
+        perror("fork");
+        exit(RETURN_FAILURE);
+    }
+    if (childpid > 0){
+        exit(EXIT_SUCCESS);
+    }
+    else if (childpid == 0){
+        // We are in the child
+        // setsid()
+        pid_t sidpid = setsid();
+        if (sidpid < 0) {
+            perror("setsid");
+            exit(RETURN_FAILURE);
+        }
+        // chdir("/")
+        int rc = chdir("/");
+        if (rc < 0){
+            perror("chdir");
+            exit(RETURN_FAILURE);
+        }
+
+        // redir stdin, stdout, stderr to /dev/null
+        open("/dev/null", O_RDWR); // stdin
+        dup(0); // stdout
+        dup(0); // stderr
+    }
+}
+
 int main(int argc, char** argv){
     const bool daemon_mode = (argc > 1 && strcmp(argv[1], "-d") == 0);
 
@@ -132,6 +164,14 @@ int main(int argc, char** argv){
     syslog(LOG_INFO, "aesdsocket started (%s). %s, pid = %d", daemon_mode ? "daemon mode" : "interactive mode",
            argv[0], getpid());
     
+
+    // Socket stuff
+    int sockfd = setup_socket();
+
+    if (daemon_mode){
+        daemonize();
+    }
+
     // Signal stuff
     int  rc_signal      = 0;
     struct sigaction new_action;
@@ -148,11 +188,9 @@ int main(int argc, char** argv){
         syslog(LOG_ERR, "Error %d (%s) registrering for SIGINT", errno, strerror(errno));
         exit(RETURN_FAILURE);
     }
-
     syslog(LOG_INFO, "Signal handlers installed");
 
-    // Socket stuff
-    int sockfd                  = setup_socket();
+    
     syslog(LOG_INFO, "setup_socket done, sockfd = %d", sockfd);
     
     struct sockaddr client_addr = { 0 };
@@ -160,7 +198,6 @@ int main(int argc, char** argv){
     bool failure                = false;
     while (true){
         if (signal_caught == true){
-            printf("Caught signal exiting\n");
             syslog(LOG_INFO, "Caught signal exiting\n");
             break;
         }
@@ -186,7 +223,6 @@ int main(int argc, char** argv){
         
         const char *ip = inet_ntoa(((struct sockaddr_in*)&client_addr)->sin_addr);
         syslog(LOG_INFO, "Accepted connection from %s", ip);
-        printf("Accepted connection from %s\n", ip);
 
         //open file for writing
         FILE* outfile = fopen(FILENAME, "a");
@@ -201,7 +237,7 @@ int main(int argc, char** argv){
         ssize_t total_bytes = 0;
         while (    (bytes = recv(client_fd, buf, sizeof(buf), 0)  ) >= 0    ){
             if (bytes == 0){
-                printf("Client sent EOF\n");
+                // EOF
                 break;
             }
             size_t res_writetofile = fwrite(buf, sizeof buf[0], (size_t) bytes, outfile);
@@ -212,7 +248,6 @@ int main(int argc, char** argv){
                 break;
             }
 
-            printf("Written to file %ld bytes\n", bytes);
             fflush(outfile);
             total_bytes += bytes;
 
@@ -220,7 +255,6 @@ int main(int argc, char** argv){
                 if (send_file_content(client_fd) < 0){
                     syslog(LOG_ERR, "ERROR: could not send file contents");
                 }
-                    
             }
             memset(buf, 0, sizeof buf);
         }
@@ -234,29 +268,19 @@ int main(int argc, char** argv){
             failure = true;
             break;
         }
-    
-        printf("Received %ld bytes from the client\n", total_bytes);
-        printf("Closed connection from %s\n", ip);
-
         fclose(outfile);
-        
         syslog(LOG_INFO, "Closed connection from %s", ip);
         close(client_fd);
     }
 
     if (signal_caught == true){
-        //printf("Deleting file %s... ", FILENAME);
         int unlink_res = unlink(FILENAME);
         if (unlink_res == -1){
-            //printf(" FAILURE!\n");
             syslog(LOG_ERR, "Failed to unlink outfile %s, errno = %d: %s", FILENAME, errno, strerror(errno));
-        }
-        else{
-            //printf(" SUCCESS!\n");
         }
     }
     
     close(sockfd);
     closelog();
-    return 0;
+    return EXIT_SUCCESS;
 }
