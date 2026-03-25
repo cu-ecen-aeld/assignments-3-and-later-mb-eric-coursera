@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 
-//const int PORT = 9000;
 const char PORT[]     = "9000";
 const int  BACKLOG    = 4;
 const char FILENAME[] = "/var/tmp/aesdsocketdata";
@@ -149,9 +148,13 @@ void daemonize()
         }
 
         // redir stdin, stdout, stderr to /dev/null
-        open("/dev/null", O_RDWR); // stdin
-        dup(0); // stdout
-        dup(0); // stderr
+        int devnull_fd = open("/dev/null", O_RDWR);
+        if (devnull_fd == -1){
+            perror("open devnull");
+            exit(RETURN_FAILURE);
+        }
+        dup2(devnull_fd, STDOUT_FILENO);
+        dup2(devnull_fd, STDERR_FILENO);
     }
 }
 
@@ -197,34 +200,25 @@ int main(int argc, char** argv){
     socklen_t client_addr_len   = sizeof(client_addr);
     bool failure                = false;
     while (true){
-        if (signal_caught == true){
-            syslog(LOG_INFO, "Caught signal exiting\n");
-            break;
-        }
         memset(&client_addr, 0, sizeof client_addr);
         int client_fd = accept(sockfd, &client_addr, &client_addr_len);
         if (client_fd < 0){
             if (errno == EINTR){
                 signal_caught = true;
+                close(client_fd);
+                break;
             }
             else{
-                printf("Error, errno=%d, %s\n", errno, strerror(errno));
                 syslog(LOG_ERR, "Failed on accept(), errno = %d: %s", errno, strerror(errno));
                 failure = true;
+                close(client_fd);
                 break;
             }
         }
 
-        if (signal_caught == true){
-            //printf("Caught signal exiting\n");
-            syslog(LOG_INFO, "Caught signal exiting\n");
-            break;
-        }
-        
         const char *ip = inet_ntoa(((struct sockaddr_in*)&client_addr)->sin_addr);
         syslog(LOG_INFO, "Accepted connection from %s", ip);
 
-        //open file for writing
         FILE* outfile = fopen(FILENAME, "a");
         if (outfile == NULL){
             syslog(LOG_ERR, "Failed to open outfile %s\n", FILENAME);
@@ -235,11 +229,7 @@ int main(int argc, char** argv){
         char buf[1024] = { 0 };
         ssize_t bytes = 0;
         ssize_t total_bytes = 0;
-        while (    (bytes = recv(client_fd, buf, sizeof(buf), 0)  ) >= 0    ){
-            if (bytes == 0){
-                // EOF
-                break;
-            }
+        while (    (bytes = recv(client_fd, buf, sizeof(buf), 0)  ) > 0    ){
             size_t res_writetofile = fwrite(buf, sizeof buf[0], (size_t) bytes, outfile);
             if (res_writetofile < bytes){
                 syslog(LOG_ERR, "Failed to write to file %s, errno = %d: %s", FILENAME, errno, strerror(errno));
@@ -258,22 +248,31 @@ int main(int argc, char** argv){
             }
             memset(buf, 0, sizeof buf);
         }
-
-        if (failure == true){
-            break;
+        if (bytes < 0){
+            if (errno == EINTR){
+                signal_caught = true;
+                break;
+            }
+            else{
+                syslog(LOG_ERR, "Failed on recv(), errno = %d: %s", errno, strerror(errno));
+                failure = true;
+                break;
+            }
         }
 
-        if (bytes == -1){
-            syslog(LOG_ERR, "Failed at recv(), %d: %s", errno, strerror(errno));
-            failure = true;
-            break;
-        }
         fclose(outfile);
         syslog(LOG_INFO, "Closed connection from %s", ip);
         close(client_fd);
+        if (failure == true || signal_caught == true){
+            break;
+        }
+        if (signal_caught == true){
+            break;
+        }
     }
 
     if (signal_caught == true){
+        syslog(LOG_INFO, "Caught signal, exiting\n");
         int unlink_res = unlink(FILENAME);
         if (unlink_res == -1){
             syslog(LOG_ERR, "Failed to unlink outfile %s, errno = %d: %s", FILENAME, errno, strerror(errno));
