@@ -275,7 +275,10 @@ int main(int argc, char** argv){
         syslog(LOG_INFO, "Caught signal, exiting\n");
         int unlink_res = unlink(FILENAME);
         if (unlink_res == -1){
-            syslog(LOG_ERR, "Failed to unlink outfile %s, errno = %d: %s", FILENAME, errno, strerror(errno));
+            // Nonexisting file is not considered an error
+            if (errno != ENOENT){
+                syslog(LOG_ERR, "Failed to unlink outfile %s, errno = %d: %s", FILENAME, errno, strerror(errno));
+            }
         }
     }
     
