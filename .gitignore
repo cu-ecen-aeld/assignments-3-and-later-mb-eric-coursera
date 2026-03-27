@@ -7,6 +7,7 @@ aesd-build
 .vscode/
 test.sh.log
 .github/workflows/actions-runner/
+actions-runner/*
+aesdsocket
 server/aesdsocket
 server/valgrind-out.txt
-actions-runner/*
