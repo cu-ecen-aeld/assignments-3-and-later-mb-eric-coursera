@@ -3,10 +3,19 @@
 
 CC=$(CROSS_COMPILE)gcc
 
-aesdsocket: aesdsocket.o
+aesdsocket: aesdsocket.o thread_slist.o
 	$(CC) $< -o $@
 
 aesdsocket.o: aesdsocket.c
+	$(CC) -c $< -o $@
+
+llisttest: llisttest.o
+	$(CC)  $< -o $@
+
+llisttest.o: llisttest.c
+	$(CC) -c $< -o $@
+
+thread_slist.o: thread_slist.c thread_slist.h
 	$(CC) -c $< -o $@
 
 all: aesdsocket
@@ -14,4 +23,4 @@ all: aesdsocket
 default: aesdsocket
 
 clean:
-	rm -f  *.o aesdsocket a.out
+	rm -f  *.o aesdsocket llisttest a.out

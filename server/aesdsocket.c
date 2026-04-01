@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <string.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -13,6 +14,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include "thread_slist.h"
+
 
 const char PORT[]     = "9000";
 const int  BACKLOG    = 4;
@@ -22,7 +25,29 @@ const int RETURN_FAILURE = -1;
 
 bool signal_caught = false;
 
-// TODO: signal handler
+
+
+
+typedef struct accept_thread_data{
+    bool             thread_complete_success;
+    pthread_mutex_t *mutex_ptr;
+    int              client_fd;
+    FILE            *outfile;
+} accept_thread_data_t;
+
+
+void* accept_thr_func(void* thread_param){
+    printf("Hello from accept_thr_func\n");
+    return thread_param;
+}
+
+void* timer_thr_func(void *thread_param){
+    return thread_param;
+}
+    
+
+
+
 void sighandler(int signum){
     if (signum == SIGINT || signum == SIGTERM){
         signal_caught = true;
@@ -158,6 +183,12 @@ void daemonize()
     }
 }
 
+
+
+// TODO: [2026-04-01]
+// * Move all the code after accept in the loop into own thread, so that multiple clients can be accepted
+// * make sure all cleanup is done properly whether on clean exit or signal/error
+
 int main(int argc, char** argv){
     const bool daemon_mode = (argc > 1 && strcmp(argv[1], "-d") == 0);
 
@@ -192,13 +223,20 @@ int main(int argc, char** argv){
         exit(RETURN_FAILURE);
     }
     syslog(LOG_INFO, "Signal handlers installed");
-
     
-    syslog(LOG_INFO, "setup_socket done, sockfd = %d", sockfd);
+    // Open the file
+    FILE* outfile = fopen(FILENAME, "a");
+    if (outfile == NULL){
+        syslog(LOG_ERR, "Failed to open outfile %s\n", FILENAME);
+        exit(RETURN_FAILURE);
+    }
     
     struct sockaddr client_addr = { 0 };
     socklen_t client_addr_len   = sizeof(client_addr);
     bool failure                = false;
+
+    pthread_mutex_t mutex;
+    pthread_mutex_init(&mutex, NULL);
     while (true){
         memset(&client_addr, 0, sizeof client_addr);
         int client_fd = accept(sockfd, &client_addr, &client_addr_len);
@@ -216,16 +254,36 @@ int main(int argc, char** argv){
             }
         }
 
+
+        // start off a new thread
+        pthread_t thread = { 0 };
+        accept_thread_data_t *acc_thr_data = calloc(sizeof(accept_thread_data_t), 1);
+        if (acc_thr_data == NULL){
+            // error, gracefully exit
+            syslog(LOG_ERR, "Was not able to allocate enough memory for thread data\n");
+        }
+
+        acc_thr_data->outfile = outfile;
+        acc_thr_data->mutex_ptr = &mutex;
+        
+
+        
+        // pthread_create
+        int rc = pthread_create(&thread, NULL, &accept_thr_func, acc_thr_data);
+        if (rc < 0){
+            //  something went wrong, deal with it
+            syslog(LOG_ERR, "Failed on creating a thread for client_fd = %d, errno = %d, %s\n", client_fd, errno, strerror(errno));
+            //continue;
+        }
+
+        pthread_join(thread, NULL);
+        free(acc_thr_data);
+
+        
         const char *ip = inet_ntoa(((struct sockaddr_in*)&client_addr)->sin_addr);
         syslog(LOG_INFO, "Accepted connection from %s", ip);
 
-        FILE* outfile = fopen(FILENAME, "a");
-        if (outfile == NULL){
-            syslog(LOG_ERR, "Failed to open outfile %s\n", FILENAME);
-            close(client_fd);
-            failure = true;
-            break;
-        }
+
         char buf[1024] = { 0 };
         ssize_t bytes = 0;
         ssize_t total_bytes = 0;
@@ -281,7 +339,7 @@ int main(int argc, char** argv){
             }
         }
     }
-    
+    pthread_mutex_destroy(&mutex);
     close(sockfd);
     closelog();
     return EXIT_SUCCESS;
